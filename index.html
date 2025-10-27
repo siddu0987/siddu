@@ -428,8 +428,21 @@
 
     function saveContractAddress() {
       const address = document.getElementById('contractAddress').value.trim();
-      if (!address || !ethers.utils.isAddress(address)) {
-        alert('Please enter a valid Ethereum address');
+      if (!address) {
+        updateStatus('contractStatus', '❌ Please enter a contract address', 'error');
+        return;
+      }
+      if (!address.startsWith('0x') || address.length !== 42) {
+        updateStatus('contractStatus', '❌ Invalid address format. Must start with 0x and be 42 characters', 'error');
+        return;
+      }
+      try {
+        if (!ethers.utils.isAddress(address)) {
+          updateStatus('contractStatus', '❌ Invalid Ethereum address', 'error');
+          return;
+        }
+      } catch (e) {
+        updateStatus('contractStatus', '❌ Invalid Ethereum address', 'error');
         return;
       }
       localStorage.setItem('contractAddress', address);
@@ -470,22 +483,30 @@
     async function connectWallet() {
       try {
         if (typeof window.ethereum === 'undefined') {
-          alert('MetaMask is not installed. Please install MetaMask to use this app.\n\nVisit: https://metamask.io/download/');
+          updateStatus('walletStatus', '❌ MetaMask not installed. Please install it first.', 'error');
+          setTimeout(() => {
+            window.open('https://metamask.io/download/', '_blank');
+          }, 2000);
           return;
         }
 
-        updateStatus('walletStatus', 'Connecting...', 'not-connected');
+        updateStatus('walletStatus', '🔄 Connecting to MetaMask...', 'warning');
+
+        await window.ethereum.request({
+          method: 'wallet_requestPermissions',
+          params: [{ eth_accounts: {} }]
+        });
 
         provider = new ethers.providers.Web3Provider(window.ethereum);
-        const accounts = await provider.send("eth_requestAccounts", []);
-
-        if (!accounts || accounts.length === 0) {
-          updateStatus('walletStatus', '❌ No accounts found', 'error');
-          return;
-        }
+        await provider.send("eth_requestAccounts", []);
 
         signer = provider.getSigner();
         userAddress = await signer.getAddress();
+
+        if (!userAddress) {
+          updateStatus('walletStatus', '❌ Failed to get wallet address', 'error');
+          return;
+        }
 
         if (contractAddress) {
           await initContract();
@@ -493,6 +514,9 @@
           updateStatus('walletStatus', `✅ Wallet Connected: ${formatAddress(userAddress)}`, 'connected');
           updateStatus('contractStatus', '⚠️ Please configure contract address', 'warning');
         }
+
+        window.ethereum.removeAllListeners('accountsChanged');
+        window.ethereum.removeAllListeners('chainChanged');
 
         window.ethereum.on('accountsChanged', handleAccountsChanged);
         window.ethereum.on('chainChanged', () => {
@@ -503,11 +527,13 @@
         console.error('Wallet connection error:', err);
 
         if (err.code === 4001) {
-          updateStatus('walletStatus', '❌ Connection rejected by user', 'error');
+          updateStatus('walletStatus', '❌ You rejected the connection request', 'error');
         } else if (err.code === -32002) {
-          updateStatus('walletStatus', '⚠️ Please check MetaMask for pending request', 'warning');
+          updateStatus('walletStatus', '⚠️ Check MetaMask - connection request pending', 'warning');
+        } else if (err.message && err.message.includes('Already processing')) {
+          updateStatus('walletStatus', '⚠️ Please check your MetaMask extension', 'warning');
         } else {
-          updateStatus('walletStatus', '❌ Connection failed: ' + err.message, 'error');
+          updateStatus('walletStatus', '❌ Connection failed. Please try again.', 'error');
         }
       }
     }
